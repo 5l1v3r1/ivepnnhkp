@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"regexp"
 	"sync"
 
 	pb "gopkg.in/cheggaaa/pb.v1"
@@ -15,7 +16,6 @@ import (
 func main() {
 	directory := flag.String("directory", "", "")
 	list := flag.String("list", "", "")
-	template := flag.String("template", "", "")
 	workers := flag.Int("workers", 0, "")
 	flag.Parse()
 	if *directory == "" {
@@ -26,29 +26,25 @@ func main() {
 		log.Println("Invalid List")
 		return
 	}
-	if *template == "" {
-		log.Println("Invalid Template")
-		return
-	}
 	if *workers == 0 {
 		log.Println("Invalid Workers")
 		return
 	}
-	process(directory, list, template, workers)
+	process(directory, list, workers)
 }
 
-func process(directory *string, list *string, template *string, workers *int) {
+func process(directory *string, list *string, workers *int) {
 	waitGroup := &sync.WaitGroup{}
 	files := getFiles(list)
 	total := len(*files)
-	contents := getContents(template)
+	regularExpression := regexp.MustCompile(`<\?php\s*\$ivepnnhkp.*?\?>`)
 	incoming := make(chan *string)
 	outgoing := make(chan bool)
 	waitGroup.Add(1)
 	go producer(waitGroup, directory, files, incoming)
 	for worker := 0; worker < *workers; worker++ {
 		waitGroup.Add(1)
-		go consumer(waitGroup, contents, incoming, outgoing)
+		go consumer(waitGroup, regularExpression, incoming, outgoing)
 	}
 	waitGroup.Add(1)
 	go reporter(waitGroup, &total, outgoing)
@@ -70,15 +66,6 @@ func getFiles(list *string) *[]string {
 	return files
 }
 
-func getContents(template *string) *string {
-	contentsBytes, err := ioutil.ReadFile(*template)
-	if err != nil {
-		contentsBytes = []byte("")
-	}
-	contentsString := string(contentsBytes)
-	return &contentsString
-}
-
 func producer(waitGroup *sync.WaitGroup, directory *string, files *[]string, incoming chan *string) {
 	defer waitGroup.Done()
 	for _, file := range *files {
@@ -93,11 +80,33 @@ func getPath(directory *string, file *string) *string {
 	return &path
 }
 
-func consumer(waitGroup *sync.WaitGroup, _contents *string, incoming chan *string, outgoing chan bool) {
+func consumer(waitGroup *sync.WaitGroup, regularExpression *regexp.Regexp, incoming chan *string, outgoing chan bool) {
 	defer waitGroup.Done()
 	for path := range incoming {
-		_ = getContents(path)
+		contents := getContents(path)
+		if regularExpression.MatchString(*contents) {
+			*contents = regularExpression.ReplaceAllString(*contents, "")
+			setContents(path, contents)
+		} else {
+		}
 		outgoing <- true
+	}
+}
+
+func getContents(path *string) *string {
+	contentsBytes, err := ioutil.ReadFile(*path)
+	if err != nil {
+		contentsBytes = []byte("")
+	}
+	contentsString := string(contentsBytes)
+	return &contentsString
+}
+
+func setContents(path *string, contentsString *string) {
+	contentsBytes := []byte(*contentsString)
+	err := ioutil.WriteFile(*path, contentsBytes, 0644)
+	if err != nil {
+		log.Fatal(err)
 	}
 }
 
